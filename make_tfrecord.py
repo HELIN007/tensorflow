@@ -49,37 +49,51 @@ def bytes_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 
-def creat_tfrecords(filename):
+def creat_tfrecords():
+    '''
+    根据TensorFlow官方的建议，一个TFRecord文件最好包含1024个左右的图片，
+    在这可以根据一个文件内的图片个数控制最后的TFRecord文件个数。
+    '''
     # 人为设定，相当于labels标签
     classes = {'train_cats', 'train_dogs'}
-    file_path = pathlib.Path('.').cwd() / filename
-    if pathlib.Path(file_path).exists():
-        print('{0}已存在'.format(filename))
-    else:
-        with tf.python_io.TFRecordWriter(filename) as writer:
-            # 循环已有的labels标签
-            print('正在写入中...')
-            for index, name in enumerate(classes):
-                # labels的路径
-                cwd = pathlib.Path('.').cwd() / name
-                # 该labels下的所有图片
-                img_files = [x for x in cwd.iterdir() if x.is_file()]
-                # 循环每张图片
-                for i in range(len(img_files)):
-                    img = Image.open(img_files[i])
-                    img_raw = img.tobytes()  # 将图片转化为二进制
-                    # example对象对labels和image数据进行封装
-                    example = tf.train.Example(
-                        features=tf.train.Features(
-                            feature={
-                                "label": int64_feature(index),
-                                "img_raw": bytes_feature(img_raw)
-                            }
-                        )
-                    )
-                    # 序列化为字符串
-                    writer.write(example.SerializeToString())
-        print('生成%s文件成功！' % filename)
+    filename = []
+    img_num = 0  # 第几个图片
+    best_num = 25  # 一个tfrecords最佳存放图片数
+    tf_name_num = 1  # 第tf_name_num个tfrecords文件
+    tf_name = ("tfdata_%d.tfrecords" % tf_name_num)
+    filename.append(tf_name)
+    print('开始写入%s文件...' % tf_name)
+    writer = tf.python_io.TFRecordWriter(tf_name)
+    for index, name in enumerate(classes):
+        # labels的路径
+        cwd = pathlib.Path('.').cwd() / name
+        # 该labels下的所有文件
+        img_files = [x for x in cwd.iterdir() if x.is_file()]
+        # 循环每张图片
+        for i in range(len(img_files)):
+            img_num += 1
+            if img_num > best_num:
+                img_num = 1  # 开始写入下一个tfrecords文件
+                tf_name_num += 1  # 文件名+1
+                tf_name = ("tfdata_%d.tfrecords" % tf_name_num)
+                filename.append(tf_name)
+                print('开始写入%s文件...' % tf_name)
+                writer = tf.python_io.TFRecordWriter(tf_name)
+            img = Image.open(img_files[i])
+            img_raw = img.tobytes()  # 将图片转化为二进制
+            # example对象对labels和image数据进行封装
+            example = tf.train.Example(
+                features=tf.train.Features(
+                    feature={
+                        "label": int64_feature(index),
+                        "img_raw": bytes_feature(img_raw)
+                    }
+                )
+            )
+            # 序列化为字符串
+            writer.write(example.SerializeToString())
+        print('生成文件成功！')
+    return filename
 
 
 def read_tfrecords(filename):
@@ -108,7 +122,7 @@ def read_tfrecords(filename):
             # 启动多线程
             coord = tf.train.Coordinator()
             threads = tf.train.start_queue_runners(coord=coord)
-            for i in range(51):  # 不知道如何得到Tensor的长度
+            for i in range(50):  # 不知道如何得到Tensor的长度
                 image, label = sess.run([imgs, labels])
                 if 0:
                     # 要保存图片的话
@@ -120,6 +134,41 @@ def read_tfrecords(filename):
             coord.join(threads)
     # 返回的是两个Tensor张量
     return imgs, labels
+
+
+def dataset_read_tfrecords(filename):
+    dataset = tf.data.TFRecordDataset(filename)  # filename得是个list
+
+    def parser(record):
+        keys_to_features = {
+            'img_raw': tf.FixedLenFeature((), tf.string, default_value=""),
+            'label': tf.FixedLenFeature((), tf.int64,
+                                        default_value=tf.zeros([], dtype=tf.int64))
+        }
+        parsed = tf.parse_single_example(record, keys_to_features)
+        image = tf.decode_raw(parsed['img_raw'], tf.uint8)
+        image = tf.reshape(image, [128, 128, 3])
+        label = tf.cast(parsed['label'], tf.int64)
+        return image, label
+
+    dataset = dataset.map(parser)
+    dataset = dataset.shuffle(buffer_size=10000)
+    dataset = dataset.batch(20)
+    dataset = dataset.repeat(10)
+
+    iterator = dataset.make_one_shot_iterator()
+    features, labels = iterator.get_next()
+    print(features, labels)
+    # 验证数据
+    # with tf.Session() as sess:
+    #     sess.run(tf.global_variables_initializer())
+    #     coord = tf.train.Coordinator()
+    #     threads = tf.train.start_queue_runners(coord=coord)
+    #     a, b = sess.run([features, labels])
+    #     print(a.shape, b)
+    #     coord.request_stop()
+    #     coord.join(threads)
+    return features, labels
 
 
 def use_tfrecords(img, label):
@@ -147,48 +196,19 @@ def use_tfrecords(img, label):
         coord.join(threads)
 
 
-def dataset_read_tfrecords(filename):
-    dataset = tf.data.TFRecordDataset(filename)  # filename得是个list
-
-    def parser(record):
-        keys_to_features = {
-            'img_raw': tf.FixedLenFeature((), tf.string, default_value=""),
-            'label': tf.FixedLenFeature((), tf.int64,
-                                        default_value=tf.zeros([], dtype=tf.int64))
-        }
-        parsed = tf.parse_single_example(record, keys_to_features)
-        image = tf.decode_raw(parsed['img_raw'], tf.uint8)
-        image = tf.reshape(image, [128, 128, 3])
-        label = tf.cast(parsed['label'], tf.int64)
-        return image, label
-
-    dataset = dataset.map(parser)
-    dataset = dataset.shuffle(buffer_size=10000)
-    dataset = dataset.batch(10)
-    dataset = dataset.repeat(10)
-
-    iterator = dataset.make_one_shot_iterator()
-    features, labels = iterator.get_next()
-    print(features, labels)
-    # 验证数据
-    # with tf.Session() as sess:
-    #     sess.run(tf.global_variables_initializer())
-    #     coord = tf.train.Coordinator()
-    #     threads = tf.train.start_queue_runners(coord=coord)
-    #     a, b = sess.run([features, labels])
-    #     print(a.shape, b)
-    #     coord.request_stop()
-    #     coord.join(threads)
-    return features, labels
-
-
 def main():
-    filename = ['cats_dogs.tfrecords']
-    # resize_picture()
-    creat_tfrecords(filename[0])
-    img, label = read_tfrecords(filename)
+    # resize_picture()  # resize图片后可以注释掉
+    # 正则表达式匹配所需文件，返回的是路径
+    filename = 'tfdata_*.tfrecords'
+    # 因此需要取出文件名
+    filename = [x.split('/')[-1] for x in tf.gfile.Glob(filename)]
+    if not filename:
+        print('需要生成数据！')
+        filename = creat_tfrecords()
+    # filename = ['tfdata_1.tfrecords', 'tfdata_2.tfrecords']
+    img, label = read_tfrecords(filename)  # 得到两个Tensor张量
+    # dataset_read_tfrecords(filename)
     # use_tfrecords(img, label)
-    dataset_read_tfrecords(filename)
 
 
 if __name__ == '__main__':
