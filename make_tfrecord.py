@@ -64,11 +64,12 @@ def creat_tfrecords():
     filename.append(tf_name)
     print('开始写入%s文件...' % tf_name)
     writer = tf.python_io.TFRecordWriter(tf_name)
+    # 这里可以相应的作调整，可能所有图片都在一个文件夹里
     for index, name in enumerate(classes):
         # labels的路径
         cwd = pathlib.Path('.').cwd() / name
         # 该labels下的所有文件
-        img_files = [x for x in cwd.iterdir() if x.is_file()]
+        img_files = [str(x) for x in cwd.iterdir() if x.is_file()]
         # 循环每张图片
         for i in range(len(img_files)):
             img_num += 1
@@ -79,14 +80,14 @@ def creat_tfrecords():
                 filename.append(tf_name)
                 print('开始写入%s文件...' % tf_name)
                 writer = tf.python_io.TFRecordWriter(tf_name)
-            img = Image.open(img_files[i])
-            img_raw = img.tobytes()  # 将图片转化为二进制
+            # 读取图片，本身就是二进制文件了，生成的文件会很小，但在读取的时候需要解码图片
+            img = tf.gfile.FastGFile(img_files[i], 'rb').read()
             # example对象对labels和image数据进行封装
             example = tf.train.Example(
                 features=tf.train.Features(
                     feature={
                         "label": int64_feature(index),
-                        "img_raw": bytes_feature(img_raw)
+                        "img_raw": bytes_feature(img)
                     }
                 )
             )
@@ -108,8 +109,8 @@ def read_tfrecords(filename):
                                            'label': tf.FixedLenFeature([], tf.int64),
                                            'img_raw': tf.FixedLenFeature([], tf.string)
                                        })
-    # tf.decode_raw可以将字符串解析成图像对应的像素数组
-    imgs = tf.decode_raw(features['img_raw'], tf.uint8)
+    # 解码图片，对应生成tf文件的代码
+    imgs = tf.image.decode_jpeg(features['img_raw'], channels=3)
     imgs = tf.reshape(imgs, [128, 128, 3])
     imgs = tf.cast(imgs, tf.float32)
     labels = tf.cast(features['label'], tf.int32)
@@ -146,7 +147,8 @@ def dataset_read_tfrecords(filename):
                                         default_value=tf.zeros([], dtype=tf.int64))
         }
         parsed = tf.parse_single_example(record, keys_to_features)
-        image = tf.decode_raw(parsed['img_raw'], tf.uint8)
+        # image = tf.decode_raw(parsed['img_raw'], tf.uint8)  # 这种解码不行
+        image = tf.image.decode_jpeg(parsed['img_raw'], channels=3)
         image = tf.reshape(image, [128, 128, 3])
         label = tf.cast(parsed['label'], tf.int64)
         return image, label
@@ -202,13 +204,14 @@ def main():
     filename = 'tfdata_*.tfrecords'
     # 因此需要取出文件名
     filename = [x.split('/')[-1] for x in tf.gfile.Glob(filename)]
+    print(filename)
     if not filename:
         print('需要生成数据！')
         filename = creat_tfrecords()
-    # filename = ['tfdata_1.tfrecords', 'tfdata_2.tfrecords']
+    # filename = creat_tfrecords()
     img, label = read_tfrecords(filename)  # 得到两个Tensor张量
-    # dataset_read_tfrecords(filename)
-    # use_tfrecords(img, label)
+    dataset_read_tfrecords(filename)
+    use_tfrecords(img, label)
 
 
 if __name__ == '__main__':
