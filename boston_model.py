@@ -69,17 +69,6 @@ def my_input_fn(train_file, is_shuffle=False, repeat_count=1):
         # dict的key和feature_names要一一对应
         for idx, key in enumerate(feature_names):
             my_features[key] = parsed['features'][idx]
-        # my_features = {
-        #     'CRIM': parsed['features'][0],
-        #     'ZN': parsed['features'][1],
-        #     'INDUS': parsed['features'][2],
-        #     'NOX': parsed['features'][3],
-        #     'RM': parsed['features'][4],
-        #     'AGE': parsed['features'][5],
-        #     'DIS': parsed['features'][6],
-        #     'TAX': parsed['features'][7],
-        #     'PTRATIO': parsed['features'][8]
-        # }
         return my_features, parsed['label']
 
     dataset = dataset.map(parser)
