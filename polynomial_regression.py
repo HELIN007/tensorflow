@@ -1,6 +1,6 @@
 # coding: utf-8
 '''
-曲线拟合
+曲线拟合，多项式回归
 '''
 
 import tensorflow as tf
